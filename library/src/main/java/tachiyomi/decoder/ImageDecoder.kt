@@ -24,8 +24,10 @@ class ImageDecoder private constructor(
   /**
    * Decodes [region] of the image, downsampled by [sampleSize].
    *
-   * @return the bitmap, or null when the image data cannot be decoded.
-   * @throws OutOfMemoryError when the decoder or the bitmap cannot allocate memory.
+   * @return the bitmap, or null when the image data cannot be decoded. Null can also mean memory
+   *   ran out inside a codec that reports that as a decode error, such as dav1d in libheif.
+   * @throws OutOfMemoryError when an image buffer, a libheif image plane or the bitmap cannot be
+   *   allocated.
    */
   fun decode(
     region: Rect = Rect(0, 0, width, height),
@@ -107,7 +109,9 @@ class ImageDecoder private constructor(
      * Reads [stream] to the end and opens a decoder for it.
      *
      * @return the decoder, or null when no decoder supports the data or the data is invalid.
-     * @throws OutOfMemoryError when the image data or the decoder cannot allocate memory.
+     *   Null can also mean memory ran out inside libjxl, which reports that as a decode error.
+     * @throws OutOfMemoryError when the image bytes, an image buffer or a libheif image plane
+     *   cannot be allocated.
      */
     fun newInstance(
       stream: InputStream,
