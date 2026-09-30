@@ -8,6 +8,7 @@
 #include "java_stream.h"
 #include "row_convert.h"
 #include <android/bitmap.h>
+#include <cstdint>
 #include <include/lcms2.h>
 #include <jni.h>
 #include <vector>
@@ -120,11 +121,21 @@ Java_tachiyomi_decoder_ImageDecoder_nativeDecode(JNIEnv* env, jobject,
     return nullptr;
   }
 
+  // Android refuses bitmaps over INT32_MAX bytes. Check before allocating,
+  // because the size wraps in 32 bits for images of 2^30 pixels or more.
+  uint64_t outBytes = (uint64_t)outRect.width * outRect.height * 4;
+  if (outBytes > INT32_MAX) {
+    LOGE("Image too large for a bitmap: %ux%u", outRect.width, outRect.height);
+    throw_out_of_memory(env,
+                        "Image too large for a bitmap at this sample size");
+    return nullptr;
+  }
+
   // Decode before creating the bitmap, so the decoder does not compete with
   // the bitmap for memory and a failed decode leaves no bitmap behind.
   std::vector<uint8_t> out_buffer;
   try {
-    out_buffer.resize(outRect.width * outRect.height * 4);
+    out_buffer.resize(outBytes);
     decoder->decode(out_buffer.data(), outRect, inRect, sampleSize);
   } catch (std::bad_alloc&) {
     LOGE("Out of memory while decoding the image");

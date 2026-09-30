@@ -27,7 +27,7 @@ class ImageDecoder private constructor(
    * @return the bitmap, or null when the image data cannot be decoded. Null can also mean memory
    *   ran out inside a codec that reports that as a decode error, such as dav1d in libheif.
    * @throws OutOfMemoryError when an image buffer, a libheif image plane or the bitmap cannot be
-   *   allocated.
+   *   allocated, or when the bitmap would be larger than the INT32_MAX bytes Android allows.
    */
   fun decode(
     region: Rect = Rect(0, 0, width, height),
