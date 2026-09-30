@@ -10,6 +10,7 @@ static jclass imageTypeCls;
 static jmethodID imageTypeCtor;
 static jmethodID createBitmapMethod;
 static jmethodID bitmapRecycleMethod;
+static jclass outOfMemoryErrorCls;
 
 void init_java_objects(JNIEnv* env) {
   jclass tmpCls;
@@ -30,6 +31,10 @@ void init_java_objects(JNIEnv* env) {
   tmpCls = env->FindClass("android/graphics/Bitmap");
   bitmapRecycleMethod = env->GetMethodID(tmpCls, "recycle", "()V");
   env->DeleteLocalRef(tmpCls);
+
+  tmpCls = env->FindClass("java/lang/OutOfMemoryError");
+  outOfMemoryErrorCls = (jclass)env->NewGlobalRef(tmpCls);
+  env->DeleteLocalRef(tmpCls);
 }
 
 jobject create_image_decoder(JNIEnv* env, jlong decoderPtr, jint width,
@@ -45,6 +50,10 @@ jobject create_bitmap(JNIEnv* env, jint width, jint height) {
 
 void recycle_bitmap(JNIEnv* env, jobject bitmap) {
   env->CallVoidMethod(bitmap, bitmapRecycleMethod);
+}
+
+void throw_out_of_memory(JNIEnv* env, const char* message) {
+  env->ThrowNew(outOfMemoryErrorCls, message);
 }
 
 jobject create_image_type(JNIEnv* env, jint format, jboolean isAnimated) {

@@ -84,6 +84,10 @@ Java_tachiyomi_decoder_ImageDecoder_nativeNewInstance(JNIEnv* env, jclass,
       LOGE("No decoder found to handle this stream");
       return nullptr;
     }
+  } catch (std::bad_alloc&) {
+    LOGE("Out of memory while opening the image");
+    throw_out_of_memory(env, "Out of memory while opening the image");
+    return nullptr;
   } catch (std::exception& ex) {
     LOGE("%s", ex.what());
     return nullptr;
@@ -122,6 +126,10 @@ Java_tachiyomi_decoder_ImageDecoder_nativeDecode(JNIEnv* env, jobject,
   try {
     out_buffer.resize(outRect.width * outRect.height * 4);
     decoder->decode(out_buffer.data(), outRect, inRect, sampleSize);
+  } catch (std::bad_alloc&) {
+    LOGE("Out of memory while decoding the image");
+    throw_out_of_memory(env, "Out of memory while decoding the image");
+    return nullptr;
   } catch (std::exception& ex) {
     LOGE("%s", ex.what());
     return nullptr;
