@@ -116,6 +116,17 @@ Java_tachiyomi_decoder_ImageDecoder_nativeDecode(JNIEnv* env, jobject,
     return nullptr;
   }
 
+  // Decode before creating the bitmap, so the decoder does not compete with
+  // the bitmap for memory and a failed decode leaves no bitmap behind.
+  std::vector<uint8_t> out_buffer;
+  try {
+    out_buffer.resize(outRect.width * outRect.height * 4);
+    decoder->decode(out_buffer.data(), outRect, inRect, sampleSize);
+  } catch (std::exception& ex) {
+    LOGE("%s", ex.what());
+    return nullptr;
+  }
+
   auto* bitmap = create_bitmap(env, outRect.width, outRect.height);
   if (!bitmap) {
     LOGE("Failed to create a bitmap of size %dx%dx%d", outRect.width,
@@ -123,38 +134,29 @@ Java_tachiyomi_decoder_ImageDecoder_nativeDecode(JNIEnv* env, jobject,
     return nullptr;
   }
 
-  uint8_t* pixels;
-  AndroidBitmap_lockPixels(env, bitmap, (void**)&pixels);
-  if (!pixels) {
+  uint8_t* pixels = nullptr;
+  if (AndroidBitmap_lockPixels(env, bitmap, (void**)&pixels) !=
+          ANDROID_BITMAP_RESULT_SUCCESS ||
+      !pixels) {
     LOGE("Failed to lock pixels");
+    recycle_bitmap(env, bitmap);
     return nullptr;
   }
 
-  try {
-    std::vector<uint8_t> out_buffer(outRect.width * outRect.height * 4);
-    uint8_t* pout_buffer = out_buffer.data();
+  uint8_t* pout_buffer = out_buffer.data();
+  if (decoder->useTransform) {
+    cmsDoTransform(decoder->transform, pout_buffer, pixels,
+                   outRect.width * outRect.height);
 
-    decoder->decode(pout_buffer, outRect, inRect, sampleSize);
-
-    if (decoder->useTransform) {
-      cmsDoTransform(decoder->transform, pout_buffer, pixels,
-                     outRect.width * outRect.height);
-
-      if (decoder->inType == TYPE_CMYK_8 ||
-          decoder->inType == TYPE_CMYK_8_REV ||
-          decoder->inType == TYPE_GRAY_8) {
-        for (int i = 0; i < outRect.width * outRect.height; i++) {
-          pixels[i * 4 + 3] = 255;
-        }
+    if (decoder->inType == TYPE_CMYK_8 || decoder->inType == TYPE_CMYK_8_REV ||
+        decoder->inType == TYPE_GRAY_8) {
+      for (int i = 0; i < outRect.width * outRect.height; i++) {
+        pixels[i * 4 + 3] = 255;
       }
-    } else {
-      // out_buffer must be rgba.
-      memcpy(pixels, out_buffer.data(), outRect.width * outRect.height * 4);
     }
-  } catch (std::exception& ex) {
-    LOGE("%s", ex.what());
-    AndroidBitmap_unlockPixels(env, bitmap);
-    return nullptr;
+  } else {
+    // out_buffer must be rgba.
+    memcpy(pixels, pout_buffer, outRect.width * outRect.height * 4);
   }
 
   AndroidBitmap_unlockPixels(env, bitmap);
