@@ -21,6 +21,14 @@ class ImageDecoder private constructor(
   private var decoding = AtomicInteger()
   private val lock = ReentrantReadWriteLock()
 
+  /**
+   * Decodes [region] of the image, downsampled by [sampleSize].
+   *
+   * @return the bitmap, or null when the image data cannot be decoded. Null can also mean memory
+   *   ran out inside a codec that reports that as a decode error, such as dav1d in libheif.
+   * @throws OutOfMemoryError when an image buffer, a libheif image plane or the bitmap cannot be
+   *   allocated, or when the bitmap would be larger than the INT32_MAX bytes Android allows.
+   */
   fun decode(
     region: Rect = Rect(0, 0, width, height),
     sampleSize: Int = 1,
@@ -97,6 +105,14 @@ class ImageDecoder private constructor(
       System.loadLibrary("imagedecoder")
     }
 
+    /**
+     * Reads [stream] to the end and opens a decoder for it.
+     *
+     * @return the decoder, or null when no decoder supports the data or the data is invalid.
+     *   Null can also mean memory ran out inside libjxl, which reports that as a decode error.
+     * @throws OutOfMemoryError when the image bytes, an image buffer or a libheif image plane
+     *   cannot be allocated.
+     */
     fun newInstance(
       stream: InputStream,
       cropBorders: Boolean = false,
@@ -120,12 +136,8 @@ class ImageDecoder private constructor(
     private external fun nativeFindType(bytes: ByteArray): ImageType?
 
     @JvmStatic
-    private fun createBitmap(width: Int, height: Int): Bitmap? {
-      return try {
-        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-      } catch (e: OutOfMemoryError) {
-        null
-      }
+    private fun createBitmap(width: Int, height: Int): Bitmap {
+      return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     }
   }
 }

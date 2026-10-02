@@ -4,6 +4,7 @@
 
 #include "decoder_heif.h"
 #include "row_convert.h"
+#include <new>
 
 bool is_libheif_compatible(const uint8_t* bytes, uint32_t size) {
   //reject small invalid files that cause heif_check_filetype to return heif_filetype_maybe
@@ -19,6 +20,24 @@ auto init_heif_context(Stream* stream) {
   auto ctx = heif::Context();
   ctx.read_from_memory_without_copy(stream->bytes, stream->size);
   return ctx;
+}
+
+// Must be called from a catch block. Rethrows a heif::Error as std::bad_alloc
+// when libheif ran out of memory, so the caller can report it, and as
+// std::runtime_error otherwise. The security limit is reported with the same
+// error code, but it is a fixed image size limit, so it stays a runtime_error.
+// Other exceptions are rethrown as they are.
+[[noreturn]] static void rethrow_heif_error() {
+  try {
+    throw;
+  } catch (heif::Error& error) {
+    if (error.get_code() == heif_error_Memory_allocation_error &&
+        error.get_subcode() != heif_suberror_Security_limit_exceeded) {
+      LOGE("%s", error.get_message().c_str());
+      throw std::bad_alloc();
+    }
+    throw std::runtime_error(error.get_message());
+  }
 }
 
 HeifDecoder::HeifDecoder(std::shared_ptr<Stream>&& stream, bool cropBorders,
@@ -45,8 +64,8 @@ ImageInfo HeifDecoder::parseInfo() {
       } catch (std::exception& ex) {
         LOGW("Couldn't crop borders on a HEIF/AVIF image of size %dx%d",
              imageWidth, imageHeight);
-      } catch (heif::Error& error) {
-        throw std::runtime_error(error.get_message());
+      } catch (heif::Error&) {
+        rethrow_heif_error();
       }
     }
 
@@ -56,8 +75,8 @@ ImageInfo HeifDecoder::parseInfo() {
         .isAnimated = false,
         .bounds = bounds,
     };
-  } catch (heif::Error& error) {
-    throw std::runtime_error(error.get_message());
+  } catch (heif::Error&) {
+    rethrow_heif_error();
   }
 }
 
@@ -87,11 +106,12 @@ void HeifDecoder::decode(uint8_t* outPixels, Rect outRect, Rect inRect,
   // Decode full image (regions, subsamples or row by row are not supported
   // sadly)
   heif::Image img;
+  cmsHPROFILE src_profile = nullptr;
   try {
     auto ctx = init_heif_context(stream.get());
     auto handle = ctx.get_primary_image_handle();
 
-    cmsHPROFILE src_profile = getColorProfile(handle);
+    src_profile = getColorProfile(handle);
     if (!src_profile) {
       src_profile = cmsCreate_sRGBProfile(); // assume sRGB
     }
@@ -119,8 +139,11 @@ void HeifDecoder::decode(uint8_t* outPixels, Rect outRect, Rect inRect,
                            inType != TYPE_GRAY_8 ? cmsFLAGS_COPY_ALPHA : 0);
 
     cmsCloseProfile(src_profile);
-  } catch (heif::Error& error) {
-    throw std::runtime_error(error.get_message());
+  } catch (...) {
+    if (src_profile) {
+      cmsCloseProfile(src_profile);
+    }
+    rethrow_heif_error();
   }
 
   int stride;

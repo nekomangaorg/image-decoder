@@ -14,6 +14,10 @@ jobject create_image_decoder(JNIEnv* env, jlong decoderPtr, jint width,
 
 jobject create_bitmap(JNIEnv* env, jint width, jint height);
 
+void recycle_bitmap(JNIEnv* env, jobject bitmap);
+
+void throw_out_of_memory(JNIEnv* env, const char* message);
+
 jobject create_image_type(JNIEnv* env, jint format, jboolean isAnimated);
 
 #endif // IMAGEDECODER_JAVA_OBJECTS_H

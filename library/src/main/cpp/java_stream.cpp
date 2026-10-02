@@ -3,6 +3,7 @@
 //
 
 #include "java_stream.h"
+#include "java_objects.h"
 
 #define BUFFER_SIZE 8192
 #define CONTAINER_DEFAULT_SIZE (BUFFER_SIZE * 50)
@@ -41,6 +42,7 @@ std::shared_ptr<Stream> read_all_java_stream(JNIEnv* env, jobject jstream) {
   // custom deleter
   stream = (uint8_t*)malloc(streamReservedSize);
   if (!stream) {
+    throw_out_of_memory(env, "Out of memory while reading the image");
     goto fail;
   }
 
@@ -58,6 +60,7 @@ std::shared_ptr<Stream> read_all_java_stream(JNIEnv* env, jobject jstream) {
       streamReservedSize = (int)(streamReservedSize * 1.5);
       auto* tmp = (uint8_t*)realloc(stream, streamReservedSize);
       if (!tmp) {
+        throw_out_of_memory(env, "Out of memory while reading the image");
         goto fail;
       }
       stream = tmp;

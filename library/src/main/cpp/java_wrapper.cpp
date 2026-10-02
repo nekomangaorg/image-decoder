@@ -8,6 +8,7 @@
 #include "java_stream.h"
 #include "row_convert.h"
 #include <android/bitmap.h>
+#include <cstdint>
 #include <include/lcms2.h>
 #include <jni.h>
 #include <vector>
@@ -84,6 +85,10 @@ Java_tachiyomi_decoder_ImageDecoder_nativeNewInstance(JNIEnv* env, jclass,
       LOGE("No decoder found to handle this stream");
       return nullptr;
     }
+  } catch (std::bad_alloc&) {
+    LOGE("Out of memory while opening the image");
+    throw_out_of_memory(env, "Out of memory while opening the image");
+    return nullptr;
   } catch (std::exception& ex) {
     LOGE("%s", ex.what());
     return nullptr;
@@ -116,6 +121,31 @@ Java_tachiyomi_decoder_ImageDecoder_nativeDecode(JNIEnv* env, jobject,
     return nullptr;
   }
 
+  // Android refuses bitmaps over INT32_MAX bytes. Check before allocating,
+  // because the size wraps in 32 bits for images of 2^30 pixels or more.
+  uint64_t outBytes = (uint64_t)outRect.width * outRect.height * 4;
+  if (outBytes > INT32_MAX) {
+    LOGE("Image too large for a bitmap: %ux%u", outRect.width, outRect.height);
+    throw_out_of_memory(env,
+                        "Image too large for a bitmap at this sample size");
+    return nullptr;
+  }
+
+  // Decode before creating the bitmap, so the decoder does not compete with
+  // the bitmap for memory and a failed decode leaves no bitmap behind.
+  std::vector<uint8_t> out_buffer;
+  try {
+    out_buffer.resize(outBytes);
+    decoder->decode(out_buffer.data(), outRect, inRect, sampleSize);
+  } catch (std::bad_alloc&) {
+    LOGE("Out of memory while decoding the image");
+    throw_out_of_memory(env, "Out of memory while decoding the image");
+    return nullptr;
+  } catch (std::exception& ex) {
+    LOGE("%s", ex.what());
+    return nullptr;
+  }
+
   auto* bitmap = create_bitmap(env, outRect.width, outRect.height);
   if (!bitmap) {
     LOGE("Failed to create a bitmap of size %dx%dx%d", outRect.width,
@@ -123,38 +153,29 @@ Java_tachiyomi_decoder_ImageDecoder_nativeDecode(JNIEnv* env, jobject,
     return nullptr;
   }
 
-  uint8_t* pixels;
-  AndroidBitmap_lockPixels(env, bitmap, (void**)&pixels);
-  if (!pixels) {
+  uint8_t* pixels = nullptr;
+  if (AndroidBitmap_lockPixels(env, bitmap, (void**)&pixels) !=
+          ANDROID_BITMAP_RESULT_SUCCESS ||
+      !pixels) {
     LOGE("Failed to lock pixels");
+    recycle_bitmap(env, bitmap);
     return nullptr;
   }
 
-  try {
-    std::vector<uint8_t> out_buffer(outRect.width * outRect.height * 4);
-    uint8_t* pout_buffer = out_buffer.data();
+  uint8_t* pout_buffer = out_buffer.data();
+  if (decoder->useTransform) {
+    cmsDoTransform(decoder->transform, pout_buffer, pixels,
+                   outRect.width * outRect.height);
 
-    decoder->decode(pout_buffer, outRect, inRect, sampleSize);
-
-    if (decoder->useTransform) {
-      cmsDoTransform(decoder->transform, pout_buffer, pixels,
-                     outRect.width * outRect.height);
-
-      if (decoder->inType == TYPE_CMYK_8 ||
-          decoder->inType == TYPE_CMYK_8_REV ||
-          decoder->inType == TYPE_GRAY_8) {
-        for (int i = 0; i < outRect.width * outRect.height; i++) {
-          pixels[i * 4 + 3] = 255;
-        }
+    if (decoder->inType == TYPE_CMYK_8 || decoder->inType == TYPE_CMYK_8_REV ||
+        decoder->inType == TYPE_GRAY_8) {
+      for (int i = 0; i < outRect.width * outRect.height; i++) {
+        pixels[i * 4 + 3] = 255;
       }
-    } else {
-      // out_buffer must be rgba.
-      memcpy(pixels, out_buffer.data(), outRect.width * outRect.height * 4);
     }
-  } catch (std::exception& ex) {
-    LOGE("%s", ex.what());
-    AndroidBitmap_unlockPixels(env, bitmap);
-    return nullptr;
+  } else {
+    // out_buffer must be rgba.
+    memcpy(pixels, pout_buffer, outRect.width * outRect.height * 4);
   }
 
   AndroidBitmap_unlockPixels(env, bitmap);
